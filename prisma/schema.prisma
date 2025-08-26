@@ -1,0 +1,430 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ===== USUARIOS Y AUTENTICACIÓN =====
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  password  String
+  role      UserRole @default(SELLER)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relaciones
+  sales     Sale[]
+  budgets   Budget[]
+  movements FinancialMovement[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN_FULL
+  ADMIN
+  SELLER
+}
+
+// ===== PROVEEDORES =====
+model Supplier {
+  id        String   @id @default(cuid())
+  name      String
+  contact   String?
+  email     String?
+  phone     String?
+  address   String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relaciones
+  batches Batch[]
+
+  @@map("suppliers")
+}
+
+// ===== LOTES DE COMPRA =====
+model Batch {
+  id           String    @id @default(cuid())
+  supplierId   String
+  supplier     Supplier  @relation(fields: [supplierId], references: [id])
+  
+  purchaseDate DateTime
+  paymentMethod String
+  transport    String?
+  trackingNumber String?
+  totalCost    Decimal   @db.Decimal(12,2)
+  dollarRate   Decimal?  @db.Decimal(8,4)
+  
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // Relaciones
+  products     Product[]
+
+  @@map("batches")
+}
+
+// ===== PRODUCTOS =====
+model Product {
+  id          String      @id @default(cuid())
+  sku         String      @unique
+  upc         String?
+  serialNumber String?    @unique
+  
+  // Información básica
+  brand       String      @default("Apple")
+  model       String
+  capacity    String?
+  color       String
+  condition   ProductCondition
+  
+  // Precios y costos
+  purchasePrice Decimal   @db.Decimal(10,2)
+  sellingPrice  Decimal   @db.Decimal(10,2)
+  
+  // Estado y ubicación
+  status      ProductStatus @default(IN_STOCK)
+  location    String?
+  
+  // Lote de compra
+  batchId     String
+  batch       Batch       @relation(fields: [batchId], references: [id])
+  
+  // Información adicada para usados
+  batteryHealth Int?
+  hasOriginalBox Boolean   @default(false)
+  accessories   Json?
+  physicalCondition String?
+  screenCondition String?
+  functionalIssues String?
+  
+  // Metadata
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Relaciones
+  saleItems   SaleItem[]
+  budgetItems BudgetItem[]
+  webProduct  WebProduct?
+  webOrderItems WebOrderItem[]
+
+  @@map("products")
+}
+
+enum ProductCondition {
+  NEW
+  USED
+  CPO        // Certified Pre-Owned
+  REFURBISHED
+}
+
+enum ProductStatus {
+  IN_STOCK
+  SOLD
+  RESERVED
+  DAMAGED
+  REPAIR
+}
+
+// ===== VENTAS =====
+model Sale {
+  id               String     @id @default(cuid())
+  saleNumber       String     @unique
+  
+  // Cliente
+  customerName     String
+  customerCity     String
+  customerEmail    String?
+  customerPhone    String?
+  
+  // Venta
+  saleDate         DateTime   @default(now())
+  includesShipping Boolean    @default(false)
+  shippingCost     Decimal?   @db.Decimal(8,2)
+  
+  // Totales
+  subtotal         Decimal    @db.Decimal(12,2)
+  total            Decimal    @db.Decimal(12,2)
+  
+  // Pago
+  paymentMethod    String
+  paymentStatus    PaymentStatus @default(PENDING)
+  
+  // Facturación
+  invoiceNumber    String?
+  arcaIntegrated   Boolean    @default(false)
+  
+  // Garantía
+  warrantyType     WarrantyType @default(STORE)
+  
+  // Usuario y metadata
+  userId           String
+  user             User       @relation(fields: [userId], references: [id])
+  dollarRate       Decimal?   @db.Decimal(8,4)
+  observations     String?
+  
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  // Relaciones
+  items            SaleItem[]
+
+  @@map("sales")
+}
+
+model SaleItem {
+  id        String  @id @default(cuid())
+  saleId    String
+  sale      Sale    @relation(fields: [saleId], references: [id])
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  
+  quantity       Int     @default(1)
+  unitPrice      Decimal @db.Decimal(10,2)
+  purchasePrice  Decimal @db.Decimal(10,2)
+  
+  createdAt DateTime @default(now())
+
+  @@map("sale_items")
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  PARTIAL
+  CANCELLED
+}
+
+enum WarrantyType {
+  APPLE
+  STORE
+}
+
+// ===== PRESUPUESTOS =====
+model Budget {
+  id          String   @id @default(cuid())
+  budgetNumber String  @unique
+  
+  customerName  String
+  customerEmail String?
+  customerPhone String?
+  
+  subtotal      Decimal  @db.Decimal(12,2)
+  discount      Decimal? @db.Decimal(8,2)
+  total         Decimal  @db.Decimal(12,2)
+  
+  validUntil    DateTime
+  status        BudgetStatus @default(DRAFT)
+  
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  dollarRate    Decimal? @db.Decimal(8,4)
+  observations  String?
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relaciones
+  items         BudgetItem[]
+
+  @@map("budgets")
+}
+
+model BudgetItem {
+  id        String  @id @default(cuid())
+  budgetId  String
+  budget    Budget  @relation(fields: [budgetId], references: [id])
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  
+  quantity  Int     @default(1)
+  unitPrice Decimal @db.Decimal(10,2)
+  
+  createdAt DateTime @default(now())
+
+  @@map("budget_items")
+}
+
+enum BudgetStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+// ===== MÓDULO FINANCIERO =====
+model FinancialMovement {
+  id          String         @id @default(cuid())
+  type        MovementType
+  category    String
+  description String
+  amount      Decimal        @db.Decimal(12,2)
+  currency    Currency       @default(ARS)
+  dollarRate  Decimal?       @db.Decimal(8,4)
+  
+  movementDate DateTime      @default(now())
+  paymentMethod String?
+  reference    String?       // Número de factura, comprobante, etc.
+  
+  userId      String
+  user        User          @relation(fields: [userId], references: [id])
+  
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@map("financial_movements")
+}
+
+enum MovementType {
+  INCOME    // Ingreso
+  EXPENSE   // Egreso
+}
+
+enum Currency {
+  ARS
+  USD
+}
+
+// ===== GESTIÓN WEB (FUNCIONALIDAD FUTURA) =====
+model WebPage {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String   @unique
+  content     String?  // HTML/Markdown content
+  metaTitle   String?
+  metaDescription String?
+  published   Boolean  @default(false)
+  featured    Boolean  @default(false)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("web_pages")
+}
+
+model WebProduct {
+  id          String   @id @default(cuid())
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id])
+  
+  // Información específica para web
+  webTitle    String
+  webDescription String?
+  images      Json     // URLs de imágenes
+  featured    Boolean  @default(false)
+  webPrice    Decimal? @db.Decimal(10,2) // Precio específico para web
+  webStock    Int?     // Stock específico para mostrar en web
+  
+  // SEO
+  seoTitle    String?
+  seoDescription String?
+  
+  // Estado en la web
+  published   Boolean  @default(false)
+  publishedAt DateTime?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([productId])
+  @@map("web_products")
+}
+
+model WebAnalytics {
+  id          String   @id @default(cuid())
+  date        DateTime @db.Date
+  
+  // Métricas diarias
+  visits      Int      @default(0)
+  uniqueVisitors Int   @default(0)
+  pageViews   Int      @default(0)
+  conversions Int      @default(0)
+  
+  // Fuentes de tráfico
+  organicTraffic Int   @default(0)
+  socialTraffic  Int   @default(0)
+  directTraffic  Int   @default(0)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([date])
+  @@map("web_analytics")
+}
+
+model WebOrder {
+  id            String   @id @default(cuid())
+  orderNumber   String   @unique
+  
+  // Cliente web
+  customerName  String
+  customerEmail String
+  customerPhone String
+  
+  // Dirección de envío
+  shippingAddress Json
+  
+  // Orden
+  subtotal      Decimal  @db.Decimal(12,2)
+  shippingCost  Decimal? @db.Decimal(8,2)
+  total         Decimal  @db.Decimal(12,2)
+  
+  // Estado
+  status        WebOrderStatus @default(PENDING)
+  paymentStatus PaymentStatus  @default(PENDING)
+  
+  // Metadata
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relaciones
+  items         WebOrderItem[]
+
+  @@map("web_orders")
+}
+
+model WebOrderItem {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       WebOrder @relation(fields: [orderId], references: [id])
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id])
+  
+  quantity    Int      @default(1)
+  unitPrice   Decimal  @db.Decimal(10,2)
+  
+  createdAt   DateTime @default(now())
+
+  @@map("web_order_items")
+}
+
+enum WebOrderStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+// ===== CONFIGURACIONES DEL SISTEMA =====
+model SystemConfig {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("system_configs")
+}
